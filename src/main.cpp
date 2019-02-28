@@ -4,6 +4,16 @@
 
 #include <string.h>
 
+#include "SPI.h"
+#include "Adafruit_GFX.h"
+#include "Adafruit_ILI9341.h"
+
+#define TFT_DC   11
+#define TFT_CS   31
+
+// Use hardware SPI (on Uno, #13, #12, #11) and the above for CS/DC
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
+
 #define FREQ_ADV_CHANNEL_37         2      /**<Radio channel number which corresponds with 37-th BLE channel **/
 #define FREQ_ADV_CHANNEL_38         26     /**<Radio channel number which corresponds with 38-th BLE channel **/
 #define FREQ_ADV_CHANNEL_39         80     /**<Radio channel number which corresponds with 39-th BLE channel **/
@@ -16,15 +26,21 @@
 static const char version_str[16] __attribute__((at(0x2000))) = "rssi-fw-1.0.0\0\0\0";
 #endif
 
+#define MAX_CHANNELS	101
+
+#define RESET_MAX_LEVEL_COUNT 5
 
 static uint8_t min_channel        = 0;     /**< Lowest scanned channel if adv_channels_en = true */
 static uint8_t max_channel        = 80;    /**< highest scanned channel if adv_channels_en = true */
-static uint32_t sweep_delay       = 1000;
+static uint32_t sweep_delay       = 100;
 static uint32_t scan_repeat_times = 1;
 
 static bool uart_error = false;
 static bool uart_send = false;
 static bool scan_ble_adv = false;
+
+static uint8_t current_channel_levels[MAX_CHANNELS];
+static uint8_t max_channel_levels[MAX_CHANNELS];
 
 #define uart_put(c) if(uart_send) { Serial.write(c); }
 
@@ -50,6 +66,8 @@ void set_scan_ble_adv(bool enable) {
 	for (uint8_t i = min_channel; i <= max_channel; ++i)
 	{
 		uart_send_packet(i, RSSI_NO_SIGNAL);
+		current_channel_levels[i] = 0;
+		max_channel_levels[i] = 0;
 	}
 }
 
@@ -93,6 +111,12 @@ uint8_t rssi_measurer_scan_channel_repeat(uint8_t channel_number)
 		// taking minimum since sample = -dBm.
 		max = min(sample, max);
 	}
+
+	current_channel_levels[channel_number] = max;
+	if(max > max_channel_levels[channel_number]) {
+		max_channel_levels[channel_number] = max;
+	}
+
 	return max;
 }
 
@@ -101,7 +125,7 @@ void uart_get_line()
 	static const int bufsize = 64;
 	uint8_t buf[bufsize];
 
-	memset(buf+1, bufsize-1, 0);
+	memset(buf+1, 0, bufsize-1);
 
   Serial.readBytesUntil('\r', buf, bufsize);
 
@@ -158,13 +182,43 @@ void uart_get_line()
 	}
 }
 
+void reset_max_channel_level()
+{
+	for(int i = 0; i < MAX_CHANNELS; i++) {
+		max_channel_levels[i] = 0;
+	}
+}
+
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  Serial.println("2.4 GHz channel scanner");
+
+  tft.begin();
+	tft.fillScreen(ILI9341_BLACK);
+}
+
+static float bar_width = (float)tft.width() / (float)((max_channel - min_channel) + 1);
+static float bar_step = (float)tft.height() / 256.0;
+static uint32_t max_reset_count = 0;
+
+void display_bar(uint16_t x, uint16_t width, uint8_t current, uint8_t max)
+{
+	uint16_t current_height = (uint16_t)((float)current * bar_step);
+	uint16_t current_y = tft.height() - current_height;
+	uint16_t max_y = tft.height() - (uint16_t)((float)max * bar_step);
+	tft.fillRect(x, 0, width, current_y, ILI9341_BLACK);
+	tft.fillRect(x, current_y, width, current_height, ILI9341_PURPLE);
+	tft.drawLine(x, max_y, x + width - 1, max_y, ILI9341_YELLOW);
 }
 
 void loop() 
 {
+	if(++max_reset_count > RESET_MAX_LEVEL_COUNT) {
+		reset_max_channel_level();
+		max_reset_count = 0;
+	}
+
 	uint8_t sample;
 	if (scan_ble_adv) {
 		sample = rssi_measurer_scan_channel_repeat(FREQ_ADV_CHANNEL_37);
@@ -179,6 +233,10 @@ void loop()
 			sample = rssi_measurer_scan_channel_repeat(i);
 			uart_send_packet(i, sample);
 		}
+	}
+
+	for (uint8_t i = min_channel; i <= max_channel; ++i) {
+		display_bar((uint16_t)((i - min_channel) * bar_width), ceil(bar_width), current_channel_levels[i], max_channel_levels[i]);
 	}
 
 	uart_get_line();
