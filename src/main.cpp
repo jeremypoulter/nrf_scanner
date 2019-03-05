@@ -30,9 +30,12 @@ static const char version_str[16] __attribute__((at(0x2000))) = "rssi-fw-1.0.0\0
 
 #define RESET_MAX_LEVEL_COUNT 5
 
+#define MIN_DB	110 // -dB
+#define MAX_DB	20  // -dB
+
 static uint8_t min_channel        = 0;     /**< Lowest scanned channel if adv_channels_en = true */
 static uint8_t max_channel        = 80;    /**< highest scanned channel if adv_channels_en = true */
-static uint32_t sweep_delay       = 100;
+static uint32_t sweep_delay       = 10;
 static uint32_t scan_repeat_times = 1;
 
 static bool uart_error = false;
@@ -94,7 +97,7 @@ uint8_t rssi_measurer_scan_channel(uint8_t channel_number)
 	NRF_RADIO->TASKS_RSSISTART = 1;
 	WAIT_FOR(NRF_RADIO->EVENTS_RSSIEND);
 
-	sample = 127 & NRF_RADIO->RSSISAMPLE;
+	sample = NRF_RADIO->RSSISAMPLE;
 
 	NRF_RADIO->TASKS_DISABLE = 1;
 	WAIT_FOR(NRF_RADIO->EVENTS_DISABLED);
@@ -106,18 +109,19 @@ uint8_t rssi_measurer_scan_channel_repeat(uint8_t channel_number)
 {
 	uint8_t sample;
 	uint8_t max = RSSI_NO_SIGNAL;
-	for (int i = 0; i <= scan_repeat_times; ++i) {
+	for (uint32_t i = 0; i <= scan_repeat_times; ++i) {
 		sample = rssi_measurer_scan_channel(channel_number);
 		// taking minimum since sample = -dBm.
 		max = min(sample, max);
 	}
 
 	current_channel_levels[channel_number] = max;
-	if(max > max_channel_levels[channel_number]) {
+	// taking minimum since sample = -dBm.
+	if(max < max_channel_levels[channel_number]) {
 		max_channel_levels[channel_number] = max;
 	}
 
-	return max;
+	return 127 & max;
 }
 
 void uart_get_line()
@@ -185,7 +189,7 @@ void uart_get_line()
 void reset_max_channel_level()
 {
 	for(int i = 0; i < MAX_CHANNELS; i++) {
-		max_channel_levels[i] = 0;
+		max_channel_levels[i] = MIN_DB;
 	}
 }
 
@@ -196,19 +200,36 @@ void setup() {
 
   tft.begin();
 	tft.fillScreen(ILI9341_BLACK);
+
+	rssi_measurer_configure_radio();
 }
 
 static float bar_width = (float)tft.width() / (float)((max_channel - min_channel) + 1);
-static float bar_step = (float)tft.height() / 256.0;
+static float bar_step = (float)tft.height() / ((MIN_DB - MAX_DB) + 1);
 static uint32_t max_reset_count = 0;
+
+uint8_t clip(uint8_t sample)
+{
+	if(sample < MAX_DB) { 
+		return MAX_DB;
+	}
+
+	if(sample > MIN_DB) {
+		return MIN_DB;
+	}
+
+	return sample;
+}
 
 void display_bar(uint16_t x, uint16_t width, uint8_t current, uint8_t max)
 {
-	uint16_t current_height = (uint16_t)((float)current * bar_step);
-	uint16_t current_y = tft.height() - current_height;
-	uint16_t max_y = tft.height() - (uint16_t)((float)max * bar_step);
+	// current and max = -dBm.
+	current = clip(current) - MAX_DB;
+	max = clip(max) - MAX_DB;
+	uint16_t current_y = (uint16_t)((float)current * bar_step);
+	uint16_t max_y = (uint16_t)((float)max * bar_step);
 	tft.fillRect(x, 0, width, current_y, ILI9341_BLACK);
-	tft.fillRect(x, current_y, width, current_height, ILI9341_PURPLE);
+	tft.fillRect(x, current_y, width, tft.height() - current_y, ILI9341_PURPLE);
 	tft.drawLine(x, max_y, x + width - 1, max_y, ILI9341_YELLOW);
 }
 
