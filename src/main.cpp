@@ -201,6 +201,8 @@ void setup() {
   tft.begin();
 	tft.fillScreen(ILI9341_BLACK);
 
+	reset_max_channel_level();
+
 	rssi_measurer_configure_radio();
 }
 
