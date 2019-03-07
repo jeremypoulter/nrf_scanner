@@ -20,16 +20,28 @@
 #
 
 language: python
+
 python:
-    - "3.6"
-sudo: false
+    - "2.7"
+
+dist: trusty
+
+# Need python 3 for nrfutil
+addons:
+  apt:
+    packages:
+      - "python3"
+      - "python3-pip"
+
 cache:
     directories:
         - "~/.platformio"
+
 install:
     - pip install -U platformio
     - platformio update
-    - pip install -U adafruit-nrfutil
+    - sudo pip3 install -U adafruit-nrfutil
+
 script:
     - platformio run
 
