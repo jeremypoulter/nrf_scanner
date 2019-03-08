@@ -310,7 +310,6 @@ void loop()
 	}
 
 	uint32_t time_so_far = millis() - time;
-	Serial.println(time_so_far);
 	if(time_so_far < sweep_delay) {
 		delay(sweep_delay - time_so_far);
 	}
