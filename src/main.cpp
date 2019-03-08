@@ -72,8 +72,8 @@ void set_scan_ble_adv(bool enable) {
 	for (uint8_t i = min_channel; i <= max_channel; ++i)
 	{
 		uart_send_packet(i, RSSI_NO_SIGNAL);
-		current_channel_levels[i] = 0;
-		max_channel_levels[i] = 0;
+		current_channel_levels[i] = MIN_DB;
+		max_channel_levels[i] = MIN_DB;
 	}
 }
 
@@ -129,6 +129,10 @@ uint8_t rssi_measurer_scan_channel_repeat(uint8_t channel_number)
 
 void uart_get_line()
 {
+	if(!Serial.available()) {
+		return;
+	}
+
 	static const int bufsize = 64;
 	uint8_t buf[bufsize];
 
@@ -297,15 +301,16 @@ void loop()
 	uint32_t time = millis();
 	display_bar();
 
-	//uart_get_line();
-	//
-	//if (uart_error) {
-	//	delay(max(sweep_delay, 500));
-	//	uart_error = false;
-	//	set_uart_send_enable(uart_send);
-	//}
+	uart_get_line();
+
+	if (uart_error) {
+		delay(max(sweep_delay, 500));
+		uart_error = false;
+		set_uart_send_enable(uart_send);
+	}
 
 	uint32_t time_so_far = millis() - time;
+	Serial.println(time_so_far);
 	if(time_so_far < sweep_delay) {
 		delay(sweep_delay - time_so_far);
 	}
