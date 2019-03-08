@@ -28,14 +28,14 @@ static const char version_str[16] __attribute__((at(0x2000))) = "rssi-fw-1.0.0\0
 
 #define MAX_CHANNELS	101
 
-#define RESET_MAX_LEVEL_COUNT 5
+#define RESET_MAX_LEVEL_COUNT 25
 
 #define MIN_DB	110 // -dB
 #define MAX_DB	20  // -dB
 
 static uint8_t min_channel        = 0;     /**< Lowest scanned channel if adv_channels_en = true */
 static uint8_t max_channel        = 80;    /**< highest scanned channel if adv_channels_en = true */
-static uint32_t sweep_delay       = 10;
+static uint32_t sweep_delay       = 40;
 static uint32_t scan_repeat_times = 1;
 
 static bool uart_error = false;
@@ -44,6 +44,9 @@ static bool scan_ble_adv = false;
 
 static uint8_t current_channel_levels[MAX_CHANNELS];
 static uint8_t max_channel_levels[MAX_CHANNELS];
+
+static uint16_t display_current_channel_y[MAX_CHANNELS];
+static uint16_t display_max_channel_y[MAX_CHANNELS];
 
 #define uart_put(c) if(uart_send) { Serial.write(c); }
 
@@ -186,22 +189,36 @@ void uart_get_line()
 	}
 }
 
-void reset_max_channel_level()
+inline void reset_channel_level(uint8_t *channels)
 {
 	for(int i = 0; i < MAX_CHANNELS; i++) {
-		max_channel_levels[i] = MIN_DB;
+		channels[i] = MIN_DB;
 	}
+}
+
+inline void reset_display_levels(uint16_t *channels)
+{
+	for(int i = 0; i < MAX_CHANNELS; i++) {
+		channels[i] = tft.height();
+	}
+}
+
+inline void reset_max_channel_level() {
+	reset_channel_level(max_channel_levels);
 }
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
-  Serial.println("2.4 GHz channel scanner");
+  //Serial.println("2.4 GHz channel scanner");
 
   tft.begin();
 	tft.fillScreen(ILI9341_BLACK);
 
-	reset_max_channel_level();
+	reset_channel_level(current_channel_levels);
+	reset_channel_level(max_channel_levels);
+	reset_display_levels(display_current_channel_y);
+	reset_display_levels(display_max_channel_y);
 
 	rssi_measurer_configure_radio();
 }
@@ -223,16 +240,35 @@ uint8_t clip(uint8_t sample)
 	return sample;
 }
 
-void display_bar(uint16_t x, uint16_t width, uint8_t current, uint8_t max)
+void display_bar()
 {
 	// current and max = -dBm.
-	current = clip(current) - MAX_DB;
-	max = clip(max) - MAX_DB;
-	uint16_t current_y = (uint16_t)((float)current * bar_step);
-	uint16_t max_y = (uint16_t)((float)max * bar_step);
-	tft.fillRect(x, 0, width, current_y, ILI9341_BLACK);
-	tft.fillRect(x, current_y, width, tft.height() - current_y, ILI9341_PURPLE);
-	tft.drawLine(x, max_y, x + width - 1, max_y, ILI9341_YELLOW);
+	for (uint8_t i = min_channel; i <= max_channel; ++i) 
+	{
+		uint16_t x = (uint16_t)((i - min_channel) * bar_width);
+		uint16_t width = ceil(bar_width);
+
+		uint8_t current = clip(current_channel_levels[i]) - MAX_DB;
+		uint8_t max = clip(max_channel_levels[i]) - MAX_DB;
+
+		uint16_t current_y = (uint16_t)((float)current * bar_step);
+		uint16_t max_y = (uint16_t)((float)max * bar_step);
+
+		uint16_t display_current_y = display_current_channel_y[i];
+		uint16_t display_max_y = display_max_channel_y[i];
+
+		if(current_y > display_current_y) {
+			tft.fillRect(x, display_current_y, width, current_y - display_current_y, ILI9341_BLACK);
+		} else if(current_y < display_current_y) {
+			tft.fillRect(x, current_y, width, display_current_y - current_y, ILI9341_PURPLE);
+		}
+
+		tft.drawLine(x, display_max_y, x + width - 1, display_max_y, display_max_y >= current_y ? ILI9341_PURPLE : ILI9341_BLACK);
+		tft.drawLine(x, max_y, x + width - 1, max_y, ILI9341_YELLOW);
+
+		display_current_channel_y[i] = current_y;
+		display_max_channel_y[i] = max_y;
+	}
 }
 
 void loop() 
@@ -258,17 +294,19 @@ void loop()
 		}
 	}
 
-	for (uint8_t i = min_channel; i <= max_channel; ++i) {
-		display_bar((uint16_t)((i - min_channel) * bar_width), ceil(bar_width), current_channel_levels[i], max_channel_levels[i]);
+	uint32_t time = millis();
+	display_bar();
+
+	//uart_get_line();
+	//
+	//if (uart_error) {
+	//	delay(max(sweep_delay, 500));
+	//	uart_error = false;
+	//	set_uart_send_enable(uart_send);
+	//}
+
+	uint32_t time_so_far = millis() - time;
+	if(time_so_far < sweep_delay) {
+		delay(sweep_delay - time_so_far);
 	}
-
-	uart_get_line();
-
-	if (uart_error) {
-		delay(max(sweep_delay, 500));
-		uart_error = false;
-		set_uart_send_enable(uart_send);
-	}
-
-	delay(sweep_delay);
 }
