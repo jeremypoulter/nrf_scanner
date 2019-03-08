@@ -267,8 +267,8 @@ void display_bar()
 			tft.fillRect(x, current_y, width, display_current_y - current_y, ILI9341_PURPLE);
 		}
 
-		tft.drawLine(x, display_max_y, x + width - 1, display_max_y, display_max_y >= current_y ? ILI9341_PURPLE : ILI9341_BLACK);
-		tft.drawLine(x, max_y, x + width - 1, max_y, ILI9341_YELLOW);
+		tft.drawFastHLine(x, display_max_y, width, display_max_y >= current_y ? ILI9341_PURPLE : ILI9341_BLACK);
+		tft.drawFastHLine(x, max_y, width, ILI9341_YELLOW);
 
 		display_current_channel_y[i] = current_y;
 		display_max_channel_y[i] = max_y;
