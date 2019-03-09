@@ -35,7 +35,8 @@ static const char version_str[16] __attribute__((at(0x2000))) = "rssi-fw-1.0.0\0
 
 static uint8_t min_channel        = 0;     /**< Lowest scanned channel if adv_channels_en = true */
 static uint8_t max_channel        = 80;    /**< highest scanned channel if adv_channels_en = true */
-static uint32_t sweep_delay       = 40;
+static uint32_t sweep_delay       = 5;
+static uint32_t display_delay     = 80;
 static uint32_t scan_repeat_times = 1;
 
 static bool uart_error = false;
@@ -118,11 +119,8 @@ uint8_t rssi_measurer_scan_channel_repeat(uint8_t channel_number)
 		max = min(sample, max);
 	}
 
-	current_channel_levels[channel_number] = max;
-	// taking minimum since sample = -dBm.
-	if(max < max_channel_levels[channel_number]) {
-		max_channel_levels[channel_number] = max;
-	}
+	current_channel_levels[channel_number] = min(current_channel_levels[channel_number], max);
+	max_channel_levels[channel_number] = min(max_channel_levels[channel_number], max);
 
 	return 127 & max;
 }
@@ -207,10 +205,6 @@ inline void reset_display_levels(uint16_t *channels)
 	}
 }
 
-inline void reset_max_channel_level() {
-	reset_channel_level(max_channel_levels);
-}
-
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -275,31 +269,46 @@ void display_bar()
 	}
 }
 
+static uint32_t scan_time = 0;
+static uint32_t display_time = 0;
+
 void loop() 
 {
-	if(++max_reset_count > RESET_MAX_LEVEL_COUNT) {
-		reset_max_channel_level();
-		max_reset_count = 0;
-	}
-
-	uint8_t sample;
-	if (scan_ble_adv) {
-		sample = rssi_measurer_scan_channel_repeat(FREQ_ADV_CHANNEL_37);
-		uart_send_packet(FREQ_ADV_CHANNEL_37, sample);
-		sample = rssi_measurer_scan_channel_repeat(FREQ_ADV_CHANNEL_38);
-		uart_send_packet(FREQ_ADV_CHANNEL_38, sample);
-		sample = rssi_measurer_scan_channel_repeat(FREQ_ADV_CHANNEL_39);
-		uart_send_packet(FREQ_ADV_CHANNEL_39, sample);
-	} else {
-		for (uint8_t i = min_channel; i <= max_channel; ++i)
-		{
-			sample = rssi_measurer_scan_channel_repeat(i);
-			uart_send_packet(i, sample);
-		}
-	}
-
 	uint32_t time = millis();
-	display_bar();
+
+	if(time > scan_time)
+	{
+		uint8_t sample;
+		if (scan_ble_adv) {
+			sample = rssi_measurer_scan_channel_repeat(FREQ_ADV_CHANNEL_37);
+			uart_send_packet(FREQ_ADV_CHANNEL_37, sample);
+			sample = rssi_measurer_scan_channel_repeat(FREQ_ADV_CHANNEL_38);
+			uart_send_packet(FREQ_ADV_CHANNEL_38, sample);
+			sample = rssi_measurer_scan_channel_repeat(FREQ_ADV_CHANNEL_39);
+			uart_send_packet(FREQ_ADV_CHANNEL_39, sample);
+		} else {
+			for (uint8_t i = min_channel; i <= max_channel; ++i)
+			{
+				sample = rssi_measurer_scan_channel_repeat(i);
+				uart_send_packet(i, sample);
+			}
+		}
+
+		scan_time = time + sweep_delay;
+	}
+
+	if(time > display_time)
+	{
+		display_bar();
+		reset_channel_level(current_channel_levels);
+
+		if(++max_reset_count > RESET_MAX_LEVEL_COUNT) {
+			reset_channel_level(max_channel_levels);
+			max_reset_count = 0;
+		}
+
+		display_time = time + display_delay;
+	}
 
 	uart_get_line();
 
@@ -309,8 +318,8 @@ void loop()
 		set_uart_send_enable(uart_send);
 	}
 
-	uint32_t time_so_far = millis() - time;
-	if(time_so_far < sweep_delay) {
-		delay(sweep_delay - time_so_far);
+	time = millis();
+	if(time < display_time && time < scan_time) {
+		delay(min(display_time, scan_time) - time);
 	}
 }
